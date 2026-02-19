@@ -35,6 +35,8 @@ COPY . .
 ARG PBR_VERSION=0.0.0
 ENV PBR_VERSION=${PBR_VERSION}
 
+RUN python -c "import os; print('PBR_VERSION=', os.environ.get('PBR_VERSION'))"
+
 # "Build" = instalacja projektu (pbr nie wywali się bez gita)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .
