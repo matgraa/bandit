@@ -36,7 +36,8 @@ pipeline {
           env.IMG_DEPS    = "bandit-deps:${BUILD_NUMBER}-${GIT_SHA}"
           env.IMG_BUILDER = "bandit-builder:${BUILD_NUMBER}-${GIT_SHA}"
           env.IMG_TESTER  = "bandit-tester:${BUILD_NUMBER}-${GIT_SHA}"
-          env.PBR_VER     = "${BUILD_NUMBER}-${GIT_SHA}"
+          env.PBR_VER = "0.0.0+${BUILD_NUMBER}.${GIT_SHA}"
+
         }
 
         sh '''
