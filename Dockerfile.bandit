@@ -1,9 +1,9 @@
 # Dockerfile.bandit
 # Multi-stage: deps -> builder -> tester
-# Buduj targetami:
-#   docker build -f Dockerfile.bandit --target deps    -t bandit-deps:3.12.3 .
-#   docker build -f Dockerfile.bandit --target builder -t bandit-builder:3.12.3 .
-#   docker build -f Dockerfile.bandit --target tester  -t bandit-tester:3.12.3 .
+# Build examples:
+#   docker build -f Dockerfile.bandit --target deps    -t bandit-deps:local .
+#   docker build -f Dockerfile.bandit --target builder --build-arg PBR_VERSION="0.0.0+1.abcdef0" -t bandit-builder:local .
+#   docker build -f Dockerfile.bandit --target tester  --build-arg PBR_VERSION="0.0.0+1.abcdef0" -t bandit-tester:local .
 
 FROM python:3.12.3-slim AS deps
 WORKDIR /app
@@ -26,18 +26,22 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM deps AS builder
 WORKDIR /app
 
+# Tooling for builds
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -U pip setuptools wheel
 
+# Copy project sources (bez .git)
 COPY . .
 
-# >>> KLUCZOWA POPRAWKA DLA PBR (bez .git):
+# --- PBR override (bez .git) ---
+# UWAGA: wartość MUSI być PEP 440 compliant, np. 0.0.0+3.df413bb
 ARG PBR_VERSION=0.0.0
 ENV PBR_VERSION=${PBR_VERSION}
 
+# DEBUG: upewnij się w logu builda, że PBR_VERSION dochodzi z Jenkins
 RUN python -c "import os; print('PBR_VERSION=', os.environ.get('PBR_VERSION'))"
 
-# "Build" = instalacja projektu (pbr nie wywali się bez gita)
+# "Build" = instalacja projektu (pbr nie powinien wywalić się bez gita)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .
 
@@ -45,12 +49,13 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM builder AS tester
 WORKDIR /app
 
-# Test deps (z repo)
+# Test deps (z repo) + tox
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r test-requirements.txt
-
-# Repo ma tox.ini, więc uruchamiamy testy przez tox
-RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r test-requirements.txt && \
     pip install tox
 
-CMD ["tox", "-q"]
+# (opcjonalnie) miejsce na logi z CI, używane przez Jenkins bind-mount
+ENV CI_LOG_DIR=/ci-logs
+
+# Domyślnie uruchamiamy tox (Jenkins i tak może nadpisać CMD)
+CMD ["sh", "-lc", "tox -q"]
