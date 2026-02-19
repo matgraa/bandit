@@ -1,0 +1,61 @@
+# Dockerfile.bandit
+# Multi-stage Dockerfile tworzący 3 obrazy: Dependencies -> Builder -> Tester
+# Buduj konkretnym targetem:
+#   docker build -f Dockerfile.bandit --target deps    -t bandit-deps:3.12.3 .
+#   docker build -f Dockerfile.bandit --target builder -t bandit-builder:3.12.3 .
+#   docker build -f Dockerfile.bandit --target tester  -t bandit-tester:3.12.3 .
+
+# === 1) Dependencies (runtime + podstawowe deps Pythona) ===
+FROM python:3.12.3-slim AS deps
+WORKDIR /app
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+# (Opcjonalnie) certy do pobierania paczek i git jeśli kiedyś potrzebny.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Najpierw kopiujemy tylko pliki z zależnościami, żeby warstwa była cache’owalna.
+# Uwaga: jeśli Bandit ma requirements-dev/test w repo, dopisz je tutaj.
+COPY requirements.txt ./requirements.txt
+
+# Instalujemy runtime deps (dla Bandit: PyYAML/stevedore/rich itp.)
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install -r requirements.txt
+
+
+# === 2) Builder (bazuje na Dependencies, robi "build" artefaktu) ===
+FROM deps AS builder
+WORKDIR /app
+
+# Narzędzia do budowania paczki (wheel/sdist).
+# Jeśli trafisz na zależności wymagające kompilacji C, wtedy dopiero dodaj build-essential itp.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install build wheel setuptools
+
+# Kopiujemy cały kod projektu (zakładamy, że budujesz z katalogu repo Bandit)
+COPY . .
+
+# Budujemy paczkę (sdist + wheel) do /out
+RUN python -m build --outdir /out
+
+# (Opcjonalnie) instalacja z wheel do weryfikacji, że pakiet da się zainstalować
+# RUN pip install /out/*.whl
+
+
+# === 3) Tester (bazuje na Builder, uruchamia testy) ===
+FROM builder AS tester
+WORKDIR /app
+
+# Instalujemy zależności testowe.
+# Jeśli repo ma extras typu .[test] lub plik requirements-test.txt, użyj go zamiast poniższego.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install pytest
+
+# Uruchamiamy testy (możesz dopasować ścieżki/markery do repo)
+# Logi w Jenkinsie będą w konsoli; jeśli chcesz plik, dodaj --junitxml=/out/junit.xml itd.
+CMD ["pytest", "-q"]
