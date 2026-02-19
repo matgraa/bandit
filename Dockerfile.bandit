@@ -1,9 +1,10 @@
 # Dockerfile.bandit
-# Multi-stage: deps -> builder -> tester
+# Multi-stage: deps -> build (build+dev tools) -> tester (RUN testów bez instalacji)
+#
 # Build examples:
-#   docker build -f Dockerfile.bandit --target deps    -t bandit-deps:local .
-#   docker build -f Dockerfile.bandit --target builder --build-arg PBR_VERSION="0.0.0+1.abcdef0" -t bandit-builder:local .
-#   docker build -f Dockerfile.bandit --target tester  --build-arg PBR_VERSION="0.0.0+1.abcdef0" -t bandit-tester:local .
+#   docker build -f Dockerfile.bandit --target deps   -t bandit-deps:local .
+#   docker build -f Dockerfile.bandit --target build  --build-arg PBR_VERSION="0.0.0+1.abcdef0" -t bandit-build:local .
+#   docker build -f Dockerfile.bandit --target tester --build-arg PBR_VERSION="0.0.0+1.abcdef0" -t bandit-tester:local .
 
 FROM python:3.12.3-slim AS deps
 WORKDIR /app
@@ -23,7 +24,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
 
 
-FROM deps AS builder
+# =========================================================
+# build = builder + dev (WSZYSTKIE instalacje tutaj)
+# - instaluje projekt (pbr przez PBR_VERSION)
+# - instaluje test/dev deps + tox (przeniesione z dawnego "tester")
+# =========================================================
+FROM deps AS build
 WORKDIR /app
 
 # Tooling for builds
@@ -38,24 +44,29 @@ COPY . .
 ARG PBR_VERSION=0.0.0
 ENV PBR_VERSION=${PBR_VERSION}
 
-# DEBUG: upewnij się w logu builda, że PBR_VERSION dochodzi z Jenkins
+# (debug – możesz zostawić na czas diagnozy)
 RUN python -c "import os; print('PBR_VERSION=', os.environ.get('PBR_VERSION'))"
 
-# "Build" = instalacja projektu (pbr nie powinien wywalić się bez gita)
+# Instalacja projektu (build)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .
 
-
-FROM builder AS tester
-WORKDIR /app
-
-# Test deps (z repo) + tox
+# Test/dev deps + tox (PRZENIESIONE z etapu "tester")
+COPY test-requirements.txt ./test-requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r test-requirements.txt && \
     pip install tox
 
-# (opcjonalnie) miejsce na logi z CI, używane przez Jenkins bind-mount
 ENV CI_LOG_DIR=/ci-logs
 
-# Domyślnie uruchamiamy tox (Jenkins i tak może nadpisać CMD)
+
+# =========================================================
+# tester = uruchamianie testów (ZERO instalacji)
+# Bazuje na build, tylko odpala tox
+# =========================================================
+FROM build AS tester
+WORKDIR /app
+
+# Tylko uruchom testy; Jenkins i tak zwykle nadpisze CMD,
+# ale trzymamy sensowny domyślny entrypoint.
 CMD ["sh", "-lc", "tox -q"]

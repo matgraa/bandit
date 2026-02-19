@@ -14,6 +14,7 @@ pipeline {
   }
 
   stages {
+
     stage('Checkout') {
       steps {
         cleanWs()
@@ -30,14 +31,18 @@ pipeline {
       }
     }
 
-    stage('Build images (deps -> builder -> tester)') {
+    stage('Build images (deps -> build -> tester)') {
       steps {
         script {
-          env.IMG_DEPS    = "bandit-deps:${BUILD_NUMBER}-${GIT_SHA}"
-          env.IMG_BUILDER = "bandit-builder:${BUILD_NUMBER}-${GIT_SHA}"
-          env.IMG_TESTER  = "bandit-tester:${BUILD_NUMBER}-${GIT_SHA}"
-          env.PBR_VER = "0.0.0+${BUILD_NUMBER}.${GIT_SHA}"
+          // tag: BUILD_NUMBER + short SHA (jak chciałeś)
+          env.TAG        = "${BUILD_NUMBER}-${GIT_SHA}"
 
+          env.IMG_DEPS   = "bandit-deps:${TAG}"
+          env.IMG_BUILD  = "bandit-build:${TAG}"
+          env.IMG_TESTER = "bandit-tester:${TAG}"
+
+          // PEP 440 compliant (ważne!)
+          env.PBR_VER    = "0.0.0+${BUILD_NUMBER}.${GIT_SHA}"
         }
 
         sh '''
@@ -47,9 +52,9 @@ pipeline {
           docker build -f "${DOCKERFILE}" --target deps \
             -t "${IMG_DEPS}" .
 
-          docker build -f "${DOCKERFILE}" --target builder \
+          docker build -f "${DOCKERFILE}" --target build \
             --build-arg PBR_VERSION="${PBR_VER}" \
-            -t "${IMG_BUILDER}" .
+            -t "${IMG_BUILD}" .
 
           docker build -f "${DOCKERFILE}" --target tester \
             --build-arg PBR_VERSION="${PBR_VER}" \
@@ -58,11 +63,13 @@ pipeline {
       }
     }
 
-    stage('Test (inside tester, logs outside)') {
+    stage('Test (tester runs, logs outside)') {
       steps {
         sh '''
           set -euxo pipefail
+
           docker run --rm \
+            -e PBR_VERSION="${PBR_VER}" \
             -v "$PWD/${LOG_DIR}:/ci-logs" \
             "${IMG_TESTER}" \
             sh -lc 'tox -q 2>&1 | tee /ci-logs/tox.log'
@@ -74,6 +81,8 @@ pipeline {
   post {
     always {
       archiveArtifacts artifacts: "${LOG_DIR}/**", fingerprint: true, allowEmptyArchive: true
+
+      // JUnit zadziała dopiero gdy wygenerujesz junit.xml (np. z tox/pytest/stestr)
       junit testResults: "${LOG_DIR}/junit.xml", allowEmptyResults: true
     }
   }
