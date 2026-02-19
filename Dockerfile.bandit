@@ -1,5 +1,6 @@
 # Dockerfile.bandit
-# Buduj:
+# Multi-stage: deps -> builder -> tester
+# Buduj targetami:
 #   docker build -f Dockerfile.bandit --target deps    -t bandit-deps:3.12.3 .
 #   docker build -f Dockerfile.bandit --target builder -t bandit-builder:3.12.3 .
 #   docker build -f Dockerfile.bandit --target tester  -t bandit-tester:3.12.3 .
@@ -16,6 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
+# Runtime deps
 COPY requirements.txt ./requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r requirements.txt
@@ -24,13 +26,16 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM deps AS builder
 WORKDIR /app
 
-# narzędzia build/instalacji projektu
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -U pip setuptools wheel
 
 COPY . .
 
-# "Build" w sensie przygotowania i instalacji pakietu
+# >>> KLUCZOWA POPRAWKA DLA PBR (bez .git):
+ARG PBR_VERSION=0.0.0
+ENV PBR_VERSION=${PBR_VERSION}
+
+# "Build" = instalacja projektu (pbr nie wywali się bez gita)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install .
 
@@ -38,13 +43,12 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM builder AS tester
 WORKDIR /app
 
-# instalujemy zależności testowe dokładnie jak w repo
+# Test deps (z repo)
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install -r test-requirements.txt
 
-# Najbardziej zgodnie z repo: użyj tox (bo masz tox.ini)
+# Repo ma tox.ini, więc uruchamiamy testy przez tox
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install tox
 
-# Domyślnie uruchom tox (wybierze envy z tox.ini)
 CMD ["tox", "-q"]

@@ -36,15 +36,23 @@ pipeline {
           env.IMG_DEPS    = "bandit-deps:${BUILD_NUMBER}-${GIT_SHA}"
           env.IMG_BUILDER = "bandit-builder:${BUILD_NUMBER}-${GIT_SHA}"
           env.IMG_TESTER  = "bandit-tester:${BUILD_NUMBER}-${GIT_SHA}"
+          env.PBR_VER     = "${BUILD_NUMBER}-${GIT_SHA}"
         }
 
         sh '''
           set -euxo pipefail
           docker version
 
-          docker build -f "${DOCKERFILE}" --target deps    -t "${IMG_DEPS}" .
-          docker build -f "${DOCKERFILE}" --target builder -t "${IMG_BUILDER}" .
-          docker build -f "${DOCKERFILE}" --target tester  -t "${IMG_TESTER}" .
+          docker build -f "${DOCKERFILE}" --target deps \
+            -t "${IMG_DEPS}" .
+
+          docker build -f "${DOCKERFILE}" --target builder \
+            --build-arg PBR_VERSION="${PBR_VER}" \
+            -t "${IMG_BUILDER}" .
+
+          docker build -f "${DOCKERFILE}" --target tester \
+            --build-arg PBR_VERSION="${PBR_VER}" \
+            -t "${IMG_TESTER}" .
         '''
       }
     }
@@ -53,9 +61,6 @@ pipeline {
       steps {
         sh '''
           set -euxo pipefail
-
-          # Uwaga: tox zwykle sam zarządza środowiskiem.
-          # Tu zapisujemy log do pliku na hoście.
           docker run --rm \
             -v "$PWD/${LOG_DIR}:/ci-logs" \
             "${IMG_TESTER}" \
@@ -68,17 +73,7 @@ pipeline {
   post {
     always {
       archiveArtifacts artifacts: "${LOG_DIR}/**", fingerprint: true, allowEmptyArchive: true
-      // jeśli nie generujesz junit xml, to junit będzie puste i OK (allowEmptyResults)
       junit testResults: "${LOG_DIR}/junit.xml", allowEmptyResults: true
-    }
-
-    cleanup {
-      sh '''
-        set +e
-        # Zostawienie obrazów poprawia cache. Jeśli musisz czyścić, odkomentuj:
-        # docker rmi "${IMG_TESTER}" "${IMG_BUILDER}" "${IMG_DEPS}" 2>/dev/null || true
-        true
-      '''
     }
   }
 }
